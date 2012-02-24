@@ -19,7 +19,7 @@ class PubSubTestCase(unittest.TestCase):
             )
         self.assertEquals(self.client.publish('foo', 'hello foo'), 1)
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'message',
                 'pattern': None,
@@ -39,7 +39,7 @@ class PubSubTestCase(unittest.TestCase):
             )
         self.assertEquals(self.client.publish('foo', 'hello foo'), 1)
         self.assertEquals(
-            self.pubsub.listen().next(),
+            next(self.pubsub.listen()),
             {
                 'type': 'pmessage',
                 'pattern': 'fo*',

@@ -2,9 +2,17 @@ import redis
 import unittest
 import datetime
 import time
-from string import letters
 from distutils.version import StrictVersion
 from redis.client import parse_info
+from redis.compat import (
+    unichr,
+    unicode,
+    MAJOR_VERSION
+    )
+if MAJOR_VERSION >= 3:
+    from string import ascii_letters as letters
+else:
+    from string import letters
 
 class ServerCommandsTestCase(unittest.TestCase):
 
@@ -41,15 +49,19 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assertEquals(self.client.get('a'), None)
         byte_string = 'value'
         integer = 5
-        unicode_string = unichr(3456) + u'abcd' + unichr(3421)
+        unicode_string = unichr(3456) + unicode('abcd') + unichr(3421)
         self.assert_(self.client.set('byte_string', byte_string))
         self.assert_(self.client.set('integer', 5))
         self.assert_(self.client.set('unicode_string', unicode_string))
         self.assertEquals(self.client.get('byte_string'), byte_string)
         self.assertEquals(self.client.get('integer'), str(integer))
-        self.assertEquals(
-                self.client.get('unicode_string').decode('utf-8'),
-                unicode_string)
+        if MAJOR_VERSION >= 3:
+                self.assertEquals(self.client.get("unicode_string"),
+                        unicode_string)
+        else:
+                self.assertEquals(
+                        self.client.get('unicode_string').decode('utf-8'),
+                        unicode_string)
 
     def test_getitem_and_setitem(self):
         self.client['a'] = 'bar'
@@ -122,7 +134,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         # real logic
         self.assertEquals(self.client.append('a', 'a1'), 2)
         self.assertEquals(self.client['a'], 'a1')
-        self.assert_(self.client.append('a', 'a2'), 4)
+        self.assertEqual(self.client.append('a', 'a2'), 4)
         self.assertEquals(self.client['a'], 'a1a2')
 
     def test_decr(self):
@@ -202,7 +214,7 @@ class ServerCommandsTestCase(unittest.TestCase):
     def test_mset(self):
         d = {'a': '1', 'b': '2', 'c': '3'}
         self.assert_(self.client.mset(d))
-        for k, v in d.iteritems():
+        for k,v in d.items():
             self.assertEquals(self.client[k], v)
 
     def test_msetnx(self):
@@ -210,7 +222,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         self.assert_(self.client.msetnx(d))
         d2 = {'a': 'x', 'd': '4'}
         self.assert_(not self.client.msetnx(d2))
-        for k, v in d.iteritems():
+        for k,v in d.items():
             self.assertEquals(self.client[k], v)
         self.assertEquals(self.client.get('d'), None)
 
@@ -957,7 +969,7 @@ class ServerCommandsTestCase(unittest.TestCase):
 
     # HASHES
     def make_hash(self, key, d):
-        for k, v in d.iteritems():
+        for k,v in d.items():
             self.client.hset(key, k, v)
 
     def test_hget_and_hset(self):
@@ -1081,7 +1093,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
         keys = h.keys()
-        keys.sort()
+        keys = sorted(keys)
         remote_keys = self.client.hkeys('a')
         remote_keys.sort()
         self.assertEquals(keys, remote_keys)
@@ -1110,7 +1122,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         h = {'a1': '1', 'a2': '2', 'a3': '3'}
         self.make_hash('a', h)
         vals = h.values()
-        vals.sort()
+        vals = sorted(vals)
         remote_vals = self.client.hvals('a')
         remote_vals.sort()
         self.assertEquals(vals, remote_vals)
@@ -1253,7 +1265,7 @@ class ServerCommandsTestCase(unittest.TestCase):
                    'foo\tbar\x07': '789',
                    }
         # fill in lists
-        for key, value in mapping.iteritems():
+        for key, value in mapping.items():
             for c in value:
                 self.assertTrue(self.client.rpush(key, c))
 
@@ -1301,7 +1313,7 @@ class ServerCommandsTestCase(unittest.TestCase):
         "The PythonParser has some special cases for return values > 1MB"
         # load up 5MB of data into a key
         data = []
-        for i in range(5000000/len(letters)):
+        for i in range(5000000//len(letters)):
             data.append(letters)
         data = ''.join(data)
         self.client.set('a', data)

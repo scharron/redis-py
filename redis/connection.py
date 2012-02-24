@@ -1,5 +1,14 @@
 import socket
-from itertools import chain, imap
+import sys
+from itertools import chain
+from redis.compat import (
+    bytes,
+    imap,
+    long,
+    unicode,
+    xrange,
+    MAJOR_VERSION
+    )
 from redis.exceptions import (
     RedisError,
     ConnectionError,
@@ -8,10 +17,13 @@ from redis.exceptions import (
     AuthenticationError
 )
 
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
+if MAJOR_VERSION >= 3:
+    from io import StringIO
+else:
+    try:
+        from cStringIO import StringIO
+    except ImportError:
+        from StringIO import StringIO
 
 try:
     import hiredis
@@ -34,7 +46,11 @@ class PythonParser(object):
 
     def on_connect(self, connection):
         "Called when the socket connects"
-        self._fp = connection._sock.makefile('r')
+        if MAJOR_VERSION >= 3:
+            fmode = 'rb'
+        else:
+            fmode = 'r'
+        self._fp = connection._sock.makefile(fmode)
 
     def on_disconnect(self):
         "Called when the socket disconnects"
@@ -44,7 +60,7 @@ class PythonParser(object):
 
     def read(self, length=None):
         """
-        Read a line from the socket is no length is specified,
+        Read a line from the socket if no length is specified,
         otherwise read ``length`` bytes. Always strip away the newlines.
         """
         try:
@@ -59,17 +75,28 @@ class PythonParser(object):
                         buf = StringIO()
                         while bytes_left > 0:
                             read_len = min(bytes_left, self.MAX_READ_LENGTH)
-                            buf.write(self._fp.read(read_len))
+                            if MAJOR_VERSION >= 3:
+                                buf.write(self._fp.read(read_len).decode("utf-8"))
+                            else:
+                                buf.write(self._fp.read(read_len))
                             bytes_left -= read_len
                         buf.seek(0)
-                        return buf.read(length)
+                        result = buf.read(length)
+                        return result
                     finally:
                         buf.close()
-                return self._fp.read(bytes_left)[:-2]
+                result = self._fp.read(bytes_left)[:-2]
+                if MAJOR_VERSION >= 3:
+                    result = result.decode()
+                return result
 
             # no length, read a full line
-            return self._fp.readline()[:-2]
-        except (socket.error, socket.timeout), e:
+            result = self._fp.readline()[:-2]
+            if MAJOR_VERSION >= 3:
+                result = result.decode()
+            return result
+        except (socket.error, socket.timeout):
+            e = sys.exc_info()[1]
             raise ConnectionError("Error while reading from socket: %s" % \
                 (e.args,))
 
@@ -139,7 +166,8 @@ class HiredisParser(object):
         while response is False:
             try:
                 buffer = self._sock.recv(4096)
-            except (socket.error, socket.timeout), e:
+            except (socket.error, socket.timeout):
+                e = sys.exc_info()[1]
                 raise ConnectionError("Error while reading from socket: %s" % \
                     (e.args,))
             if not buffer:
@@ -185,7 +213,8 @@ class Connection(object):
             return
         try:
             sock = self._connect()
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             raise ConnectionError(self._error_message(e))
 
         self._sock = sock
@@ -240,8 +269,11 @@ class Connection(object):
         if not self._sock:
             self.connect()
         try:
+            if MAJOR_VERSION >= 3:
+                command = command.encode()
             self._sock.sendall(command)
-        except socket.error, e:
+        except socket.error:
+            e = sys.exc_info()[1]
             self.disconnect()
             if len(e.args) == 1:
                 _errno, errmsg = 'UNKNOWN', e.args[0]
@@ -276,9 +308,23 @@ class Connection(object):
 
     def pack_command(self, *args):
         "Pack a series of arguments into a value Redis command"
-        command = ['$%s\r\n%s\r\n' % (len(enc_value), enc_value)
-                   for enc_value in imap(self.encode, args)]
-        return '*%s\r\n%s' % (len(command), ''.join(command))
+
+        cmds = []
+        if MAJOR_VERSION >= 3:
+            for enc_value in imap(self.encode, args):
+                if isinstance(enc_value, bytes):
+                    cmds += ['$%s\r\n%s\r\n' % (len(enc_value),
+                                                enc_value.decode())]
+                else:
+                    cmds += ['$%s\r\n%s\r\n' % (len(enc_value),
+                                                 enc_value)]
+        else:
+            for enc_value in imap(self.encode, args):
+                cmds += ['$%s\r\n%s\r\n' % (len(enc_value),
+                                             enc_value)]
+
+        return '*%s\r\n%s' % (len(cmds), ''.join(cmds))
+
 
 class UnixDomainSocketConnection(Connection):
     def __init__(self, path='', db=0, password=None,
